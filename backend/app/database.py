@@ -16,3 +16,7 @@ async def get_db() -> AsyncSession:
             yield session
         finally:
             await session.close()
+
+
+# Alias for routers that import get_session
+get_session = get_db
