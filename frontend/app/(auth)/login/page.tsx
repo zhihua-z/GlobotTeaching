@@ -11,7 +11,6 @@ import { useToast } from "@/components/ui/use-toast";
 import Link from "next/link";
 
 export default function LoginPage() {
-  const router = useRouter();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,7 +26,8 @@ export default function LoginPage() {
       document.cookie = "session_token=mock-session-token; path=/; max-age=86400";
       document.cookie = "user_role=student; path=/; max-age=86400";
       toast({ title: "登录成功", description: "欢迎回到 Globot 法考" });
-      router.push("/home");
+      // Use full page navigation so middleware re-checks cookies
+      window.location.href = "/home";
     } else {
       toast({
         title: "登录失败",
