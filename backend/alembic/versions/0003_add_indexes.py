@@ -22,56 +22,13 @@ def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    # Questions composite index
-    op.create_index(
-        "ix_questions_curriculum_subject",
-        "questions",
-        ["curriculum", "subject"],
-        postgresql_using="btree",
-    )
-
-    # Type index
-    op.create_index(
-        "ix_questions_type",
-        "questions",
-        ["type"],
-        postgresql_using="btree",
-    )
-
-    # Difficulty index
-    op.create_index(
-        "ix_questions_difficulty",
-        "questions",
-        ["difficulty"],
-        postgresql_using="btree",
-    )
-
-    # GIN index on topic_path array
-    op.create_index(
-        "ix_questions_topic_path_gin",
-        "questions",
-        ["topic_path"],
-        postgresql_using="gin",
-    )
-
-    # Source origin index
-    op.create_index(
-        "ix_questions_source_origin",
-        "questions",
-        ["source_origin"],
-        postgresql_using="btree",
-    )
-
-    # Trigram index on stem for fuzzy search
-    op.create_index(
-        "ix_questions_stem_trgm",
-        "questions",
-        ["stem"],
-        postgresql_using="gin",
-        postgresql_ops={"stem": "gin_trgm_ops"},
-    )
-
-    # HNSW index on embeddings for vector similarity search
+    # Create indexes with IF NOT EXISTS for idempotency
+    op.execute("CREATE INDEX IF NOT EXISTS ix_questions_curriculum_subject ON questions USING btree (curriculum, subject)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_questions_type ON questions USING btree (type)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_questions_difficulty ON questions USING btree (difficulty)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_questions_topic_path_gin ON questions USING gin (topic_path)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_questions_source_origin ON questions USING btree (source_origin)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_questions_stem_trgm ON questions USING gin (stem gin_trgm_ops)")
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_qe_embedding_hnsw "
         "ON question_embeddings USING hnsw (embedding vector_cosine_ops)"
@@ -79,10 +36,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_questions_curriculum_subject", table_name="questions")
-    op.drop_index("ix_questions_type", table_name="questions")
-    op.drop_index("ix_questions_difficulty", table_name="questions")
-    op.drop_index("ix_questions_topic_path_gin", table_name="questions")
-    op.drop_index("ix_questions_source_origin", table_name="questions")
-    op.drop_index("ix_questions_stem_trgm", table_name="questions")
+    op.execute("DROP INDEX IF EXISTS ix_questions_curriculum_subject")
+    op.execute("DROP INDEX IF EXISTS ix_questions_type")
+    op.execute("DROP INDEX IF EXISTS ix_questions_difficulty")
+    op.execute("DROP INDEX IF EXISTS ix_questions_topic_path_gin")
+    op.execute("DROP INDEX IF EXISTS ix_questions_source_origin")
+    op.execute("DROP INDEX IF EXISTS ix_questions_stem_trgm")
     op.execute("DROP INDEX IF EXISTS ix_qe_embedding_hnsw")

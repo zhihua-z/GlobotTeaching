@@ -9,9 +9,9 @@ AI-powered teaching platform with vector search capabilities. This monorepo cont
                     │   Frontend  │  Next.js 14 (App Router)
                     │  :3000      │  TailwindCSS + shadcn/ui
                     └──────┬──────┘
-                           │ HTTP (REST)
+                           │ HTTP (REST) · httpOnly cookie JWT
                     ┌──────▼──────┐
-                    │   Backend   │  FastAPI (Python 3.12)
+                    │   Backend   │  FastAPI (Python 3.9+)
                     │  :8000      │  SQLAlchemy async + pgvector
                     └──────┬──────┘
                            │ SQL
@@ -26,9 +26,9 @@ AI-powered teaching platform with vector search capabilities. This monorepo cont
 | Layer      | Technology                                                             |
 | ---------- | ---------------------------------------------------------------------- |
 | Frontend   | TypeScript, Next.js 14.2 (App Router), React 18, TailwindCSS 3.4, shadcn/ui |
-| Backend    | Python 3.12, FastAPI 0.115, SQLAlchemy 2.0 (async), Pydantic 2        |
+| Backend    | Python 3.9+, FastAPI 0.115, SQLAlchemy 2.0 (async), Pydantic 2        |
 | Database   | PostgreSQL 17 + pgvector 0.8 (vector similarity search)                |
-| Auth       | JWT (python-jose) + bcrypt (passlib)                                   |
+| Auth       | JWT (python-jose) + bcrypt (passlib) · httpOnly cookies · rate limiting |
 | Migration  | Alembic 1.14                                                           |
 | Infra      | Docker Compose, multi-stage Docker builds                              |
 
@@ -38,42 +38,47 @@ AI-powered teaching platform with vector search capabilities. This monorepo cont
 .
 ├── backend/                 # FastAPI backend service
 │   ├── app/
-│   │   ├── models/          # SQLAlchemy ORM models (Question, Document, Embeddings)
-│   │   ├── routers/         # API route handlers (health, CRUD)
+│   │   ├── models/          # SQLAlchemy ORM models (Question, Taxonomy, Auth, Embeddings)
+│   │   ├── repositories/    # Data access layer (all SQL, no business logic)
+│   │   ├── routers/         # API route handlers (health, questions, taxonomy, auth, analysis)
 │   │   ├── schemas/         # Pydantic request/response schemas
+│   │   ├── security/        # JWT, passwords, rate limiting
+│   │   ├── services/        # Business logic + transaction boundaries
 │   │   ├── config.py        # Pydantic Settings (env-based config)
-│   │   ├── database.py      # Async engine & session factory
-│   │   └── main.py          # FastAPI app entry point
-│   ├── alembic/             # Database migrations
-│   ├── Dockerfile           # Multi-stage (not used, single-stage for dev)
-│   ├── requirements.txt     # Python dependencies
+│   │   ├── database.py      # Lazy async engine & session factory
+│   │   ├── deps.py          # Dependency injection (get_current_user, require_admin)
+│   │   ├── envelope.py      # Unified {data, error} response envelope
+│   │   └── main.py          # FastAPI app entry point + lifespan
+│   ├── alembic/             # Database migrations (0001–0003)
+│   ├── scripts/ingest/      # Question bank ingestion pipeline
+│   ├── tests/               # Pytest test suite (pytest-asyncio + httpx)
+│   ├── Dockerfile
+│   ├── requirements.txt
 │   └── .env.example
-├── frontend/                # Next.js 14 frontend
-│   ├── app/                 # App Router (layout.tsx, page.tsx, globals.css)
-│   ├── components/ui/       # shadcn/ui components (Button)
-│   ├── lib/                 # Shared utilities (cn() helper)
-│   ├── src/types/           # TypeScript type definitions
-│   ├── Dockerfile           # Multi-stage build (deps → builder → runner)
-│   ├── next.config.mjs      # standalone output for Docker
-│   ├── tailwind.config.ts   # Custom theme with shadcn/ui tokens
-│   └── .env.example
-├── docs/                    # Documentation + exam question data
-│   ├── 2014年法考客观题真题.md
-│   ├── 2020年法考客观题真题.md
-│   ├── 2021年法考客观题真题.md
-│   ├── 2022年法考客观题真题.md
-│   └── 题目分析(deepseek)implementation_plan.md
+├── frontend/                # Next.js 14 frontend (33 routes)
+│   ├── app/                 # App Router with (auth), (student), admin route groups
+│   │   ├── (auth)/login/    # Login page
+│   │   ├── (student)/       # practice, review, mistakes, profile, chat, dashboard, progress, legal-articles, home
+│   │   └── admin/           # questions, taxonomy, legal-articles, pipeline, review, prompts, evals
+│   ├── components/          # UI components (shadcn/ui) + question/admin feature blocks
+│   ├── lib/                 # API client, mocks, hooks, types, providers
+│   ├── Dockerfile
+│   └── ...
+├── docs/                    # Documentation + implementation plans + exam question data
+│   ├── implementation-plan/ # Detailed implementation plans (3 documents)
+│   └── ...
 ├── docker-compose.yml       # Orchestrates db, backend, frontend
 └── README.md
 ```
 
-## Features (Planned / In Progress)
+## Features
 
-- **Question Bank**: Structured storage of questions with curriculum/subject/topic taxonomy
+- **JWT Authentication**: httpOnly cookie-based auth with bcrypt passwords, token revocation, rate limiting, and audit logging
+- **Unified API Envelope**: All responses use `{ data, error }` format with standardized error codes
+- **Question Bank**: CRUD with structured storage, taxonomy (curricula/subjects/topics/question-types), and vector embeddings
 - **Vector Search**: PostgreSQL pgvector for semantic similarity search on questions (1024-dim embeddings)
 - **Multiple Question Types**: single_choice, multiple_choice, true_false, fill_blank, short_answer, essay, code, matching, ordering
-- **JWT Authentication**: Secure API access with token-based auth
-- **Exam Paper Analysis**: Parse Chinese National Judicial Exam past papers from Markdown into structured data
+- **Exam Paper Ingestion**: Parse Chinese National Judicial Exam past papers (2014/2020/2021/2022) from Markdown into structured data
 - **AI-powered Features** (roadmap): Auto-solution generation, difficulty prediction, personalized recommendations
 
 ## Quick Start
@@ -133,16 +138,90 @@ cp backend/.env.example backend/.env
 
 ## API Endpoints
 
-| Method | Path          | Description       |
-| ------ | ------------- | ----------------- |
-| GET    | `/`           | Root              |
-| GET    | `/api/health` | Health check      |
-| GET    | `/docs`       | Swagger UI        |
+All endpoints are prefixed with `/api/v1` and use a unified `{ data, error }` envelope.
+
+### Auth (`/auth`)
+
+| Method | Path              | Description                     | Auth |
+| ------ | ----------------- | ------------------------------- | ---- |
+| POST   | `/auth/login`     | Login (sets httpOnly JWT cookie)| No   |
+| POST   | `/auth/logout`    | Logout (revokes token)          | Yes  |
+| GET    | `/auth/me`        | Current user info               | Yes  |
+
+### Questions (`/questions`)
+
+| Method | Path                            | Description                  |
+| ------ | ------------------------------- | ---------------------------- |
+| GET    | `/questions`                    | List/Filter/Search questions |
+| POST   | `/questions`                    | Create question (admin)      |
+| GET    | `/questions/{id}`              | Get question by ID           |
+| PATCH  | `/questions/{id}`              | Update question (admin)      |
+| DELETE | `/questions/{id}`              | Soft-delete question (admin) |
+| GET    | `/questions/{id}/similar?k=10` | Vector similarity search     |
+| GET    | `/questions/{id}/analysis`     | Full analysis + AI breakdown |
+| POST   | `/questions/{id}/analysis/refresh` | Refresh AI breakdown     |
+| POST   | `/questions/import`            | Bulk import (multipart/SSE)  |
+
+### Taxonomy (`/curricula`, `/subjects`, `/topics`, `/question-types`)
+
+| Method | Path                 | Description              |
+| ------ | -------------------- | ------------------------ |
+| GET    | `/curricula`         | List curricula           |
+| POST   | `/curricula`         | Create curriculum (admin)|
+| GET    | `/curricula/{id}`    | Get curriculum           |
+| PATCH  | `/curricula/{id}`    | Update curriculum (admin)|
+| DELETE | `/curricula/{id}`    | Delete curriculum (admin)|
+| GET    | `/curricula/{id}/subjects` | List subjects      |
+| POST   | `/subjects`          | Create subject (admin)   |
+| GET    | `/subjects/{id}`     | Get subject              |
+| PATCH  | `/subjects/{id}`     | Update subject (admin)   |
+| DELETE | `/subjects/{id}`     | Delete subject (admin)   |
+| GET    | `/subjects/{id}/topics`   | List topics          |
+| POST   | `/topics`            | Create topic (admin)     |
+| GET    | `/topics/{id}`       | Get topic                |
+| PATCH  | `/topics/{id}`       | Update topic (admin)     |
+| DELETE | `/topics/{id}`       | Delete topic (admin)     |
+| GET    | `/question-types`    | List question types      |
+| PATCH  | `/question-types/{code}` | Update type label (admin)|
+
+### System (`/health`)
+
+| Method | Path          | Description  |
+| ------ | ------------- | ------------ |
+| GET    | `/health`     | Health check |
+
+## Implementation Progress
+
+Implementation is tracked against [8 backend milestones](./docs/implementation-plan/IMPLEMENTATION-PLAN-3-BACKEND—后端API总实现计划.md):
+
+| Milestone | Status      | Description                                  |
+|-----------|-------------|----------------------------------------------|
+| B1        | ✅ Done     | Layered skeleton + envelope + exception handling + config |
+| B2        | ✅ Done     | Question bank + taxonomy + legal articles + search |
+| B3        | ✅ Done     | Auth (JWT/cookie/RBAC/rate limiting/audit) + user seed |
+| B4        | ✅ Done     | Prompt gateway + prompt templates + version management |
+| B5        | ✅ Done     | Pipeline + review queue + evals (full stack)  |
+| B6        | 📋 Planned  | FSRS + Profile (knowledge graph L1–L4)       |
+| B7        | 📋 Planned  | Practice + Chat + Progress + Mistakes + Settings |
+| B8        | 📋 Planned  | Dashboard + Reports + push notifications     |
+
+**Last verified:** 2026-06-01 (17:05 SGT)
+
+- **Test database:** `globot_test` created and all migrations applied successfully
+- **Tests:** 145 tests collected, 145 passed, 4 skipped, 0 failures
+- **Migrations:** 0001–0006 all apply cleanly on fresh databases
+- **B4 – Prompt Templates:** Full stack (migration 0004, model, schemas, repo, service, router, 20 tests) — all passing
+- **B5 – Pipeline + Review + Evals:** Full stack (migration 0005–0006, 2 models, 3 schemas, 3 repos, 3 services, 3 routers, 16 tests) — all passing
+  - `POST /pipeline/upload` → creates `pipeline_runs(status=pending)`
+  - `GET/POST /admin/review/queue` → CRUD `question_drafts` with approve/reject/bulk
+  - `GET/POST /admin/evals/sets|runs|cases` → eval sets, cases, and runs
+  - All admin endpoints guarded by `require_admin`, audit-logged
+- **Migration idempotency:** `0003_add_indexes.py` updated to use `CREATE INDEX IF NOT EXISTS` with direct SQL for `DROP INDEX IF EXISTS` downgrade compatibility
 
 ## Sub-projects
 
 For detailed documentation on each sub-project, see:
 
-- [Backend README](./backend/README.md) — FastAPI server, models, API, migrations
-- [Frontend README](./frontend/README.md) — Next.js app, components, types
+- [Backend README](./backend/README.md) — FastAPI server, models, API, migrations, security
+- [Frontend README](./frontend/README.md) — Next.js app (33 routes with mock data), components, types
 - [Docs README](./docs/README.md) — Documentation and exam question data

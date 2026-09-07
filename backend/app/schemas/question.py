@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -32,7 +32,7 @@ class QuestionBase(BaseModel):
     difficulty: int = Field(default=3, ge=1, le=5)
     type: QuestionType
     stem: str
-    options: Optional[dict[str, Any] | list[dict[str, Any]]] = None
+    options: Optional[Union[dict[str, Any], list[dict[str, Any]]]] = None
     answer: str = ""
     rubric: Optional[dict[str, Any]] = None
     solution: Optional[str] = None
@@ -54,7 +54,7 @@ class QuestionUpdate(BaseModel):
     difficulty: Optional[int] = Field(default=None, ge=1, le=5)
     type: Optional[QuestionType] = None
     stem: Optional[str] = None
-    options: Optional[dict[str, Any] | list[dict[str, Any]]] = None
+    options: Optional[Union[dict[str, Any], list[dict[str, Any]]]] = None
     answer: Optional[str] = None
     rubric: Optional[dict[str, Any]] = None
     solution: Optional[str] = None

@@ -9,43 +9,80 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.taxonomy import Curriculum, Subject, Topic, QuestionTypeMeta
+from app.models.taxonomy import Curriculum, Subject, Topic
+from app.schemas.taxonomy import (
+    CurriculumCreate,
+    CurriculumUpdate,
+    CurriculumResponse,
+    SubjectCreate,
+    SubjectUpdate,
+    SubjectResponse,
+    TopicCreate,
+    TopicUpdate,
+    TopicResponse,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["taxonomy"])
 
 
+# ── Helper: check duplicate code ────────────────────
+async def _check_dup_curriculum_code(db: AsyncSession, code: str, exclude_id: Optional[UUID] = None) -> None:
+    stmt = select(Curriculum).where(Curriculum.code == code)
+    if exclude_id:
+        stmt = stmt.where(Curriculum.id != exclude_id)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Curriculum code already exists")
+
+
+async def _check_dup_subject_code(db: AsyncSession, curriculum_id: UUID, code: str, exclude_id: Optional[UUID] = None) -> None:
+    stmt = select(Subject).where(Subject.curriculum_id == curriculum_id, Subject.code == code)
+    if exclude_id:
+        stmt = stmt.where(Subject.id != exclude_id)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Subject code already exists in this curriculum")
+
+
 # ── Curricula ────────────────────────────────────────
-@router.get("/curricula")
+@router.get("/curricula", response_model=list[CurriculumResponse])
 async def list_curricula(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Curriculum).order_by(Curriculum.code))
     return result.scalars().all()
 
 
-@router.post("/curricula", status_code=201)
-async def create_curriculum(
-    code: str, name: str, description: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    cur = Curriculum(code=code, name=name, description=description)
+@router.post("/curricula", response_model=CurriculumResponse, status_code=201)
+async def create_curriculum(data: CurriculumCreate, db: AsyncSession = Depends(get_db)):
+    await _check_dup_curriculum_code(db, data.code)
+    cur = Curriculum(code=data.code, name=data.name, description=data.description)
     db.add(cur)
     await db.commit()
     await db.refresh(cur)
     return cur
 
 
-@router.patch("/curricula/{curriculum_id}")
+@router.get("/curricula/{curriculum_id}", response_model=CurriculumResponse)
+async def get_curriculum(curriculum_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Curriculum).where(Curriculum.id == curriculum_id))
+    cur = result.scalar_one_or_none()
+    if not cur:
+        raise HTTPException(status_code=404, detail="Curriculum not found")
+    return cur
+
+
+@router.patch("/curricula/{curriculum_id}", response_model=CurriculumResponse)
 async def update_curriculum(
-    curriculum_id: UUID, name: Optional[str] = None, description: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    curriculum_id: UUID, data: CurriculumUpdate, db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Curriculum).where(Curriculum.id == curriculum_id))
     cur = result.scalar_one_or_none()
     if not cur:
         raise HTTPException(status_code=404, detail="Curriculum not found")
-    if name is not None:
-        cur.name = name
-    if description is not None:
-        cur.description = description
+    update_fields = data.model_dump(exclude_unset=True)
+    if "code" in update_fields and update_fields["code"] != cur.code:
+        await _check_dup_curriculum_code(db, update_fields["code"], exclude_id=curriculum_id)
+    for field, value in update_fields.items():
+        setattr(cur, field, value)
     await db.commit()
     await db.refresh(cur)
     return cur
@@ -63,7 +100,7 @@ async def delete_curriculum(curriculum_id: UUID, db: AsyncSession = Depends(get_
 
 
 # ── Subjects ──────────────────────────────────────────
-@router.get("/subjects")
+@router.get("/subjects", response_model=list[SubjectResponse])
 async def list_subjects(
     curriculum_id: Optional[UUID] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -75,31 +112,32 @@ async def list_subjects(
     return result.scalars().all()
 
 
-@router.post("/subjects", status_code=201)
-async def create_subject(
-    curriculum_id: UUID, code: str, name: str, description: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    sub = Subject(curriculum_id=curriculum_id, code=code, name=name, description=description)
+@router.post("/subjects", response_model=SubjectResponse, status_code=201)
+async def create_subject(data: SubjectCreate, db: AsyncSession = Depends(get_db)):
+    await _check_dup_subject_code(db, data.curriculum_id, data.code)
+    sub = Subject(
+        curriculum_id=data.curriculum_id,
+        code=data.code,
+        name=data.name,
+        description=data.description,
+    )
     db.add(sub)
     await db.commit()
     await db.refresh(sub)
     return sub
 
 
-@router.patch("/subjects/{subject_id}")
+@router.patch("/subjects/{subject_id}", response_model=SubjectResponse)
 async def update_subject(
-    subject_id: UUID, name: Optional[str] = None, description: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    subject_id: UUID, data: SubjectUpdate, db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Subject).where(Subject.id == subject_id))
     sub = result.scalar_one_or_none()
     if not sub:
         raise HTTPException(status_code=404, detail="Subject not found")
-    if name is not None:
-        sub.name = name
-    if description is not None:
-        sub.description = description
+    update_fields = data.model_dump(exclude_unset=True)
+    for field, value in update_fields.items():
+        setattr(sub, field, value)
     await db.commit()
     await db.refresh(sub)
     return sub
@@ -117,7 +155,7 @@ async def delete_subject(subject_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 # ── Topics ────────────────────────────────────────────
-@router.get("/topics")
+@router.get("/topics", response_model=list[TopicResponse])
 async def list_topics(
     subject_id: Optional[UUID] = Query(None),
     parent_id: Optional[UUID] = Query(None),
@@ -132,37 +170,32 @@ async def list_topics(
     return result.scalars().all()
 
 
-@router.post("/topics", status_code=201)
-async def create_topic(
-    subject_id: UUID, name: str, slug: str, depth: int = 0,
-    parent_id: Optional[UUID] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    topic = Topic(subject_id=subject_id, parent_id=parent_id, name=name, slug=slug, depth=depth)
+@router.post("/topics", response_model=TopicResponse, status_code=201)
+async def create_topic(data: TopicCreate, db: AsyncSession = Depends(get_db)):
+    topic = Topic(
+        subject_id=data.subject_id,
+        parent_id=data.parent_id,
+        name=data.name,
+        slug=data.slug,
+        depth=data.depth,
+    )
     db.add(topic)
     await db.commit()
     await db.refresh(topic)
     return topic
 
 
-@router.patch("/topics/{topic_id}")
+@router.patch("/topics/{topic_id}", response_model=TopicResponse)
 async def update_topic(
-    topic_id: UUID, name: Optional[str] = None, slug: Optional[str] = None,
-    parent_id: Optional[UUID] = None, depth: Optional[int] = None,
-    db: AsyncSession = Depends(get_db),
+    topic_id: UUID, data: TopicUpdate, db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Topic).where(Topic.id == topic_id))
     topic = result.scalar_one_or_none()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
-    if name is not None:
-        topic.name = name
-    if slug is not None:
-        topic.slug = slug
-    if parent_id is not None:
-        topic.parent_id = parent_id
-    if depth is not None:
-        topic.depth = depth
+    update_fields = data.model_dump(exclude_unset=True)
+    for field, value in update_fields.items():
+        setattr(topic, field, value)
     await db.commit()
     await db.refresh(topic)
     return topic
@@ -178,31 +211,16 @@ async def delete_topic(
     topic = result.scalar_one_or_none()
     if not topic:
         raise HTTPException(status_code=404, detail="Topic not found")
+    if reassign_to:
+        # Reassign child topics
+        await db.execute(
+            select(Topic).where(Topic.parent_id == topic_id)
+        )
+        # Use update statement
+        from sqlalchemy import update
+        await db.execute(
+            update(Topic).where(Topic.parent_id == topic_id).values(parent_id=reassign_to)
+        )
     await db.delete(topic)
     await db.commit()
     return None
-
-
-# ── Question Types ────────────────────────────────────
-@router.get("/question-types")
-async def list_question_types(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(QuestionTypeMeta).order_by(QuestionTypeMeta.code))
-    return result.scalars().all()
-
-
-@router.patch("/question-types/{code}")
-async def update_question_type(
-    code: str, label_zh: Optional[str] = None, description: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(QuestionTypeMeta).where(QuestionTypeMeta.code == code))
-    qt = result.scalar_one_or_none()
-    if not qt:
-        raise HTTPException(status_code=404, detail="Question type not found")
-    if label_zh is not None:
-        qt.label_zh = label_zh
-    if description is not None:
-        qt.description = description
-    await db.commit()
-    await db.refresh(qt)
-    return qt

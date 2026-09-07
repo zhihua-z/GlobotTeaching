@@ -1,7 +1,7 @@
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_session
+from app.database import get_db
 from app.repositories.taxonomy_repo import QuestionTypeMetaRepo
 from app.schemas.taxonomy import QuestionTypeMetaResponse, QuestionTypeMetaUpdate
 
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/v1/question-types", tags=["question-types"])
 
 
 @router.get("", response_model=list[QuestionTypeMetaResponse])
-async def list_question_types(session: AsyncSession = Depends(get_session)):
+async def list_question_types(session: AsyncSession = Depends(get_db)):
     repo = QuestionTypeMetaRepo(session)
     return await repo.list_all()
 
@@ -18,7 +18,7 @@ async def list_question_types(session: AsyncSession = Depends(get_session)):
 async def update_question_type(
     code: str,
     data: QuestionTypeMetaUpdate,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(get_db),
 ):
     repo = QuestionTypeMetaRepo(session)
     dump = data.model_dump(exclude_unset=True)

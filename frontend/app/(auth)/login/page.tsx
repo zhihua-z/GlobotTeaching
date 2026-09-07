@@ -21,20 +21,28 @@ export default function LoginPage() {
     setLoading(true);
     // Mock login
     await new Promise((r) => setTimeout(r, 800));
+    let role = "";
+    let redirectUrl = "/home";
     if (email === "zhihua@globot.com" && password === "123456") {
-      // Set mock session cookies so middleware doesn't redirect
-      document.cookie = "session_token=mock-session-token; path=/; max-age=86400";
-      document.cookie = "user_role=student; path=/; max-age=86400";
-      toast({ title: "登录成功", description: "欢迎回到 Globot 法考" });
-      // Use full page navigation so middleware re-checks cookies
-      window.location.href = "/home";
+      role = "student";
+    } else if (email === "admin@globot.com" && password === "admin123") {
+      role = "admin";
+      redirectUrl = "/admin";
     } else {
       toast({
         title: "登录失败",
         description: "邮箱或密码错误",
         variant: "destructive",
       });
+      setLoading(false);
+      return;
     }
+    // Set mock session cookies so middleware doesn't redirect
+    document.cookie = `session_token=mock-session-token; path=/; max-age=86400`;
+    document.cookie = `user_role=${role}; path=/; max-age=86400`;
+    toast({ title: "登录成功", description: `欢迎${role === "admin" ? "管理员" : "回到 Globot 法考"}` });
+    // Use full page navigation so middleware re-checks cookies
+    window.location.href = redirectUrl;
     setLoading(false);
   };
 
@@ -85,9 +93,10 @@ export default function LoginPage() {
               {loading ? "登录中..." : "登录"}
             </Button>
           </form>
-          <p className="text-center text-xs text-muted-foreground mt-4">
-            演示账号: zhihua@globot.com / 123456
-          </p>
+          <div className="text-center text-xs text-muted-foreground mt-4 space-y-1">
+            <p>学生: zhihua@globot.com / 123456</p>
+            <p>管理员: admin@globot.com / admin123</p>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, ForeignKey
-from sqlalchemy.dialects.postgresql import VECTOR
+from pgvector.sqlalchemy import VECTOR
 from app.database import Base
 from app.models.base import TimestampMixin
 

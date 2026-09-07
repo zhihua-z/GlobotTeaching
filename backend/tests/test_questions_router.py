@@ -104,7 +104,7 @@ class TestQuestionsList:
         assert len(data2["items"]) == 2
 
     async def test_404_for_missing(self, client: AsyncClient) -> None:
-        resp = await client.get("/api/v1/questions/00000000-0000-0000-0000-000000000000")
+        resp = await client.get("/api/v1/questions/99999")
         assert resp.status_code == 404
 
 

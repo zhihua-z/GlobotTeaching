@@ -10,9 +10,10 @@ class Settings(BaseSettings):
     database_url_sync: str = "postgresql://postgres:postgres@localhost:5432/globot_teaching"
 
     # JWT
-    secret_key: str = "change-me-to-a-random-secret"
-    algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 24  # 1 day
+    SECRET_KEY: str = "change-me-to-a-random-secret"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]

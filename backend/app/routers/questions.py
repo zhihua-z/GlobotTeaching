@@ -1,9 +1,11 @@
 """Question CRUD + search + similar + analysis endpoints."""
 from __future__ import annotations
 
+import json
 import math
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import select, func, text, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -291,16 +293,6 @@ async def get_analysis(question_id: int, db: AsyncSession = Depends(get_db)):
 
 
 # ── POST /api/v1/questions/import ─────────────────────
-@router.post("/questions/import", status_code=200)
-async def import_questions(
-    file: bytes = None,  # TODO: multipart file upload
-    db: AsyncSession = Depends(get_db),
-):
-    """Import JSONL. Placeholder - full implementation in ingest pipeline."""
-    return {"created": 0, "updated": 0, "errors": ["Import via scripts/ingest/seed_questions.py"]}
-
-
-# ── GET /api/v1/questions/export ──────────────────────
 @router.get("/questions/export")
 async def export_questions(
     format: str = Query("jsonl"),
@@ -316,3 +308,87 @@ async def export_questions(
         resp = await _to_response(qq, db)
         lines.append(resp.model_dump_json())
     return {"data": "\n".join(lines), "format": format}
+
+
+# ── POST /api/v1/questions/import ─────────────────────
+@router.post("/questions/import", status_code=200)
+async def import_questions(
+    file: UploadFile = File(...),
+    mode: str = Query("skip", description="skip or update"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import JSONL file. Idempotent by source_origin.
+
+    - mode=skip: skip existing (default)
+    - mode=update: update existing rows
+    """
+    created = 0
+    updated = 0
+    skipped = 0
+    errors: list[dict] = []
+
+    raw = await file.read()
+    lines = raw.decode("utf-8").splitlines()
+
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as e:
+            errors.append({"line": i + 1, "error": f"Invalid JSON: {e}"})
+            continue
+
+        source_origin = obj.get("source_origin")
+        if not source_origin:
+            errors.append({"line": i + 1, "error": "Missing source_origin"})
+            continue
+
+        # Check for existing question
+        result = await db.execute(
+            select(Question).where(
+                Question.source_origin == source_origin,
+                Question.deleted_at.is_(None),
+            )
+        )
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            if mode == "skip":
+                skipped += 1
+                continue
+            # mode == update
+            update_fields = {k: v for k, v in obj.items() if k != "source_origin"}
+            if "type" in update_fields:
+                update_fields["type"] = QuestionType(update_fields["type"])
+            for field, value in update_fields.items():
+                setattr(existing, field, value)
+            updated += 1
+        else:
+            q_type = QuestionType(obj.get("type", "single_choice"))
+            question = Question(
+                curriculum=obj.get("curriculum", "FAKAO"),
+                subject=obj.get("subject", ""),
+                topic_path=obj.get("topic_path", []),
+                difficulty=obj.get("difficulty", 3),
+                type=q_type,
+                stem=obj.get("stem", ""),
+                options=obj.get("options"),
+                answer=obj.get("answer", ""),
+                rubric=obj.get("rubric"),
+                solution=obj.get("solution"),
+                variants=obj.get("variants", []),
+                source_origin=source_origin,
+                source_year=obj.get("source_year"),
+                is_indeterminate=obj.get("is_indeterminate", False),
+                cited_articles=obj.get("cited_articles", []),
+            )
+            db.add(question)
+            created += 1
+
+    await db.commit()
+    await db.flush()
+
+    return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+
+
